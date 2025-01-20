@@ -1,58 +1,80 @@
-import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { HttpStatus, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PaginationDto } from 'src/common';
+import { RpcException } from '@nestjs/microservices';
 
 @Injectable()
 export class UsersService extends PrismaClient implements OnModuleInit {
 
-  private readonly logger = new Logger('UsersService')
+  private readonly logger = new Logger('AppUser-MS-DB')
 
   onModuleInit() {
     this.$connect();
-    this.logger.log('Database connected')
+    this.logger.log('Successfully connected')
   }
 
-  create(createUserDto: CreateUserDto) {
-    return this.user.create({
-      data: createUserDto
-    })
+  async create(createUserDto: CreateUserDto) {
+    try {
+      const user = await this.user.create({
+        data: createUserDto
+      });
+
+      return user;
+    } catch (error) {
+      const customMessage = `Email '${createUserDto.email}' is already in use.`;
+      this.handleRpcError(error, customMessage);
+    }
   }
 
   async findAll(paginationDto : PaginationDto) {
-    const {page, limit} = paginationDto;
-    const total_rows = await this.user.count({where: {active: true}});
-    const last_page = Math.ceil(total_rows/limit);
+    try {
+      const {page, limit} = paginationDto;
+      const total_rows = await this.user.count();
+      const last_page = Math.ceil(total_rows/limit);
 
-
-    return {
-      data: await this.user.findMany({
-        where: {active: true},
-        skip: (page - 1) * limit,
-        take: limit
-      }),
-      metadata: {
-        page: page,
-        limit: limit,
-        total_rows: total_rows,
-        last_page: last_page
+      return {
+        data: await this.user.findMany({
+          skip: (page - 1) * limit,
+          take: limit
+        }),
+        metadata: {
+          page: page,
+          limit: limit,
+          total_rows: total_rows,
+          last_page: last_page
+        }
       }
+    } catch (error) {
+      this.handleRpcError(error);
     }
   }
 
   async findOne(id: number) {
-    const user = await this.user.findFirst({
-      where: {id, active: true}
-    })
-
-    if(!user){
-      throw new NotFoundException(`User dosn´t exist`)
+    try {
+      const user = await this.user.findFirst({
+        where: { id },
+      });
+  
+      if (!user) {
+        throw new RpcException({
+          status: HttpStatus.NOT_FOUND,
+          message: 'Resource not found',
+        });
+      }
+  
+      return user;
+    } catch (error) {
+      
+      if (!(error instanceof RpcException)) {
+        this.handleRpcError(error);
+      }
+  
+      throw error;
     }
-
-    return user;
   }
-
+  
   async update(id: number, updateUserDto: UpdateUserDto) {
 
     try{
@@ -61,37 +83,53 @@ export class UsersService extends PrismaClient implements OnModuleInit {
         where: {id},
         data: data,
       })
-      if(!user){
-        throw new NotFoundException(`User with id ${id} does not exist`);
-      }
+      
       return user;
     }
     catch(error){
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        throw new NotFoundException(`User with id ${id} does not exist`);
-      }
-      throw new Error('An unexpected error occurred');
+      this.handleRpcError(error);
     }
   }
 
   async remove(id: number) {
-    try{
+    try {
       const user = await this.user.update({
-        where: {id},
-        data: {
-          active: false
-        },
-      })
-      if(!user){
-        throw new NotFoundException(`User with id ${id} does not exist`);
-      }
+        where: { id },
+        data: { active: false },
+      });
       return user;
+
+    } catch (error) {
+      this.handleRpcError(error);
     }
-    catch(error){
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        throw new NotFoundException(`User with id ${id} does not exist`);
+  }
+
+  private handleRpcError(error: unknown, customMessage?: string): never {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      switch (error.code) {
+        case 'P2025': // Registro no encontrado
+          throw new RpcException({
+            status: HttpStatus.NOT_FOUND,
+            message: customMessage || 'Resource not found',
+          });
+        case 'P2002': // Restricción única violada
+          throw new RpcException({
+            status: HttpStatus.CONFLICT,
+            message: customMessage || 'Duplicate entry',
+          });
+        // Agrega más códigos de error si se necesitan
+        default:
+          throw new RpcException({
+            status: HttpStatus.BAD_REQUEST,
+            message: `Database error`,
+          });
       }
-      throw new Error('An unexpected error occurred');
     }
+  
+    // Manejo de otros errores genéricos
+    throw new RpcException({
+      status: HttpStatus.INTERNAL_SERVER_ERROR,
+      message: customMessage || 'An unexpected error occurred',
+    });
   }
 }
