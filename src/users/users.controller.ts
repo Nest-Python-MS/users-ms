@@ -9,28 +9,28 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @MessagePattern({cmd : 'create_user'})
+  @MessagePattern('create_user')
   create(@Payload() createUserDto: CreateUserDto) {
     console.log(createUserDto);
     return this.usersService.create(createUserDto);
   }
 
-  @MessagePattern({cmd : 'find_all_users'})
+  @MessagePattern('find_all_users')
   findAll(@Payload() paginationDto : PaginationDto) {
     return this.usersService.findAll(paginationDto);
   }
 
-  @MessagePattern({cmd : 'find_one_user'})
+  @MessagePattern('find_one_user')
   findOne(@Payload('id') id: number) {
     return this.usersService.findOne(+id);
   }
 
-  @MessagePattern({cmd : 'update_user'})
+  @MessagePattern('update_user')
   update(@Payload() updateUserDto: UpdateUserDto) {
     return this.usersService.update(updateUserDto.id, updateUserDto);
   }
 
-  @MessagePattern({cmd : 'delete_user'})
+  @MessagePattern('delete_user')
   remove(@Payload('id') id: string) {
     return this.usersService.remove(+id);
   }
